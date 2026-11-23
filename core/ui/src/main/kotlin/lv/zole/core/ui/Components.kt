@@ -124,7 +124,7 @@ fun BackHeader(title: String, onBack: () -> Unit, modifier: Modifier = Modifier,
         modifier.fillMaxWidth().padding(top = 16.dp).offset(x = (-8).dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconTap(ZoleIcons.Back, "Atpakaļ", onBack)
+        IconTap(ZoleIcons.Back, Zole.strings.back, onBack)
         ZText(title, Modifier.padding(start = 4.dp).weight(1f), size = 22.sp, weight = FontWeight.SemiBold)
         trailing()
     }

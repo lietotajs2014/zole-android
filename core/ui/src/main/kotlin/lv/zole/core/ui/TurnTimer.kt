@@ -20,10 +20,11 @@ import androidx.compose.ui.unit.dp
 fun TurnTimerCircle(remaining: Float, secondsLeft: Int, totalSeconds: Int, modifier: Modifier = Modifier, size: Dp = 30.dp) {
     val fg = Zole.colors.text
     val bg = Zole.colors.background
+    val description = Zole.strings.timer(secondsLeft, totalSeconds)
     Canvas(
         modifier
             .size(size)
-            .semantics { contentDescription = "Atlikušas $secondsLeft sekundes no $totalSeconds" },
+            .semantics { contentDescription = description },
     ) {
         val stroke = 2.dp.toPx()
         drawCircle(bg)

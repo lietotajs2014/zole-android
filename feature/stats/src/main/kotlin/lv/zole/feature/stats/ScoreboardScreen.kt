@@ -15,9 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -38,7 +35,8 @@ import lv.zole.core.data.computeStats
 import lv.zole.core.ui.BackHeader
 import lv.zole.core.ui.Divider
 import lv.zole.core.ui.PrimaryButton
-import lv.zole.core.ui.Segmented
+import lv.zole.core.ui.ProvideMatchStrings
+import lv.zole.core.ui.Strings
 import lv.zole.core.ui.SurfaceCard
 import lv.zole.core.ui.ZText
 import lv.zole.core.ui.Zole
@@ -46,8 +44,6 @@ import lv.zole.engine.Contract
 import lv.zole.engine.DealRecord
 import lv.zole.engine.MatchState
 import lv.zole.engine.Seat
-
-val PLAYER_NAMES = listOf("Tu", "Anna", "Jānis")
 
 fun signed(v: Int, plus: Boolean = false): String = when {
     v > 0 && plus -> "+$v"
@@ -61,54 +57,76 @@ class StatsViewModel(matches: MatchRepository, dao: HistoryDao) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerStats())
 }
 
+/** In-game score sheet: the current match's deals and points. */
 @Composable
-fun ScoreboardRoute(viewModel: StatsViewModel, onBack: () -> Unit, onBackToTable: () -> Unit, initialTab: Int = 0) {
+fun ScoreboardRoute(viewModel: StatsViewModel, onBack: () -> Unit, onBackToTable: () -> Unit) {
     val match by viewModel.match.collectAsStateWithLifecycle()
-    val stats by viewModel.stats.collectAsStateWithLifecycle()
-    ScoreboardScreen(match, stats, onBack, onBackToTable, initialTab)
+    ScoreboardScreen(match, onBack, onBackToTable)
 }
 
-private fun DealRecord.label(): String {
+/** General statistics over all games (opened from the start screen). */
+@Composable
+fun StatsRoute(viewModel: StatsViewModel, onBack: () -> Unit) {
+    val stats by viewModel.stats.collectAsStateWithLifecycle()
+    StatsScreen(stats, onBack)
+}
+
+private fun DealRecord.label(t: Strings): String {
     val r = result
-    val who = r.declarer?.let { PLAYER_NAMES[it.index] }
+    val who = r.declarer?.let { t.playerNames[it.index] }.orEmpty()
     return when (r.contract) {
-        null -> "Pule"
-        Contract.TABLE -> "Galdiņš"
-        Contract.NORMAL -> "$who ņem"
-        Contract.ZOLE -> "$who zole"
-        Contract.SMALL_ZOLE -> "$who mazā zole"
+        null -> t.pool
+        Contract.TABLE -> t.table
+        Contract.NORMAL -> t.takes(who)
+        Contract.ZOLE -> t.zoleBy(who)
+        Contract.SMALL_ZOLE -> t.smallZoleBy(who)
     }
 }
 
 @Composable
-fun ScoreboardScreen(match: MatchState?, stats: PlayerStats, onBack: () -> Unit, onBackToTable: () -> Unit, initialTab: Int = 0) {
+fun ScoreboardScreen(match: MatchState?, onBack: () -> Unit, onBackToTable: () -> Unit) {
+    ProvideMatchStrings(match?.config?.difficulty) { ScoreboardContent(match, onBack, onBackToTable) }
+}
+
+@Composable
+private fun ScoreboardContent(match: MatchState?, onBack: () -> Unit, onBackToTable: () -> Unit) {
     val c = Zole.colors
-    var tab by rememberSaveable { mutableIntStateOf(initialTab) }
+    val t = Zole.strings
     val canReturn = match != null && !match.isOver
     Column(
         Modifier.fillMaxSize().background(c.background).systemBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        BackHeader("Partija", onBack) {
+        BackHeader(t.match, onBack) {
             if (match != null) {
                 val limit = match.config.dealLimit
                 val n = match.dealNumber
-                ZText(if (limit != null) "$n. dale no $limit" else "$n. dale", Modifier.padding(end = 0.dp), size = 14.sp, color = c.textSecondary)
+                ZText(t.dealOf(n, limit), Modifier.padding(end = 0.dp), size = 14.sp, color = c.textSecondary)
             }
         }
-        Segmented(listOf("Pieraksts", "Statistika"), tab, { tab = it }, height = 40.dp)
-        Column(Modifier.weight(1f)) {
-            if (tab == 0) ScoreSheet(match) else StatsList(stats)
-        }
-        if (canReturn) PrimaryButton("Atpakaļ pie galda", onBackToTable)
+        Column(Modifier.weight(1f)) { ScoreSheet(match) }
+        if (canReturn) PrimaryButton(t.backToTable, onBackToTable)
+    }
+}
+
+@Composable
+fun StatsScreen(stats: PlayerStats, onBack: () -> Unit) {
+    val c = Zole.colors
+    Column(
+        Modifier.fillMaxSize().background(c.background).systemBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        BackHeader(Zole.strings.stats, onBack)
+        Column(Modifier.weight(1f)) { StatsList(stats) }
     }
 }
 
 @Composable
 private fun ScoreSheet(match: MatchState?) {
     val c = Zole.colors
+    val t = Zole.strings
     if (match == null || match.history.isEmpty()) {
-        ZText("Vēl nav nevienas nospēlētas dales.", Modifier.fillMaxWidth().padding(top = 24.dp), color = c.textSecondary, align = TextAlign.Center)
+        ZText(t.noDeals, Modifier.fillMaxWidth().padding(top = 24.dp), color = c.textSecondary, align = TextAlign.Center)
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
@@ -120,7 +138,7 @@ private fun ScoreSheet(match: MatchState?) {
                     borderWidth = if (seat.index == 0) 1.5.dp else 1.dp,
                 ) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        ZText(PLAYER_NAMES[seat.index], size = 13.sp, color = c.textSecondary)
+                        ZText(t.playerNames[seat.index], size = 13.sp, color = c.textSecondary)
                         ZText(signed(match.totals.getValue(seat), plus = true), size = 26.sp, weight = FontWeight.Bold)
                     }
                 }
@@ -129,8 +147,8 @@ private fun ScoreSheet(match: MatchState?) {
         SurfaceCard {
             Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 10.dp)) {
                 Head("#", Modifier.weight(0.5f))
-                Head("Spēle", Modifier.weight(2f))
-                PLAYER_NAMES.forEach { Head(it, Modifier.weight(1f), TextAlign.End) }
+                Head(t.gameColumn, Modifier.weight(2f))
+                t.playerNames.forEach { Head(it, Modifier.weight(1f), TextAlign.End) }
             }
             val rows = match.history.reversed()
             LazyColumn {
@@ -145,7 +163,7 @@ private fun ScoreSheet(match: MatchState?) {
                             .padding(horizontal = 14.dp, vertical = 11.dp),
                     ) {
                         ZText(record.number.toString(), Modifier.weight(0.5f), color = c.textSecondary)
-                        ZText(record.label(), Modifier.weight(2f), color = color, weight = if (zole) FontWeight.SemiBold else FontWeight.Normal)
+                        ZText(record.label(t), Modifier.weight(2f), color = color, weight = if (zole) FontWeight.SemiBold else FontWeight.Normal)
                         Seat.ALL.forEach { seat ->
                             ZText(
                                 signed(record.totals.getValue(seat)), Modifier.weight(1f), color = color,
@@ -170,17 +188,18 @@ private fun RowScope.Head(text: String, modifier: Modifier, align: TextAlign = T
 @Composable
 private fun StatsList(s: PlayerStats) {
     val c = Zole.colors
+    val t = Zole.strings
     fun pct(a: Int, b: Int) = if (b == 0) "–" else "${a * 100 / b}%"
     val rows = listOf(
-        "Nospēlētas dales" to s.deals.toString(),
-        "Lielais" to "${s.asDeclarer} reizes",
-        "Uzvaras kā lielajam" to "${s.declarerWins} · ${pct(s.declarerWins, s.asDeclarer)}",
-        "Zoles" to if (s.zoles == 0) "0" else "${s.zoleWins}/${s.zoles} · ${pct(s.zoleWins, s.zoles)}",
-        "Vidējās acis kā lielajam" to if (s.asDeclarer == 0) "–" else s.averageDeclarerPoints.toString(),
-        "Garākā uzvaru sērija" to s.longestWinStreak.toString(),
-        "Pabeigtas partijas" to s.matches.toString(),
-        "Uzvarētas partijas" to "${s.matchesWon} · ${pct(s.matchesWon, s.matches)}",
-        "Punkti kopā" to signed(s.totalPoints, plus = true),
+        t.statDeals to s.deals.toString(),
+        t.statDeclarer to t.times(s.asDeclarer),
+        t.statDeclarerWins to "${s.declarerWins} · ${pct(s.declarerWins, s.asDeclarer)}",
+        t.statZoles to if (s.zoles == 0) "0" else "${s.zoleWins}/${s.zoles} · ${pct(s.zoleWins, s.zoles)}",
+        t.statAverageEyes to if (s.asDeclarer == 0) "–" else s.averageDeclarerPoints.toString(),
+        t.statStreak to s.longestWinStreak.toString(),
+        t.statMatches to s.matches.toString(),
+        t.statMatchesWon to "${s.matchesWon} · ${pct(s.matchesWon, s.matches)}",
+        t.statTotal to signed(s.totalPoints, plus = true),
     )
     Column(Modifier.verticalScroll(rememberScrollState())) {
         SurfaceCard {
@@ -193,7 +212,7 @@ private fun StatsList(s: PlayerStats) {
             }
         }
         ZText(
-            "Statistika skaitās tikai par tevi un krājas no visām partijām.",
+            t.statsNote,
             Modifier.padding(top = 12.dp, start = 4.dp), size = 13.sp, color = c.textSecondary,
         )
     }

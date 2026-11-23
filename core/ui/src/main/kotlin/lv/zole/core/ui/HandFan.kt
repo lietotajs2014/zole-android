@@ -59,7 +59,10 @@ fun HandFan(
     highlight: Card? = null,
     onPlay: ((Card) -> Unit)? = null,
     dealKey: Any? = null,
-    fastAnimations: Boolean = false,
+    /** Duration multiplier for the deal-in animation (smaller = faster). */
+    dealScale: Float = 1f,
+    /** Duration multiplier for the card lift (smaller = faster). */
+    liftScale: Float = 1f,
 ) {
     var held by remember { mutableStateOf<Card?>(null) }
     val currentCards by rememberUpdatedState(cards)
@@ -118,12 +121,12 @@ fun HandFan(
             cards.forEachIndexed { i, card ->
                 val angle = angleOf(i, n)
                 val isLifted = card == held || card == highlight
-                val lift by animateFloatAsState(if (isLifted) 1f else 0f, tween(if (fastAnimations) 60 else 120), label = "lift")
+                val lift by animateFloatAsState(if (isLifted) 1f else 0f, tween((120 * liftScale).toInt()), label = "lift")
                 val appear = remember(dealKey, card) { Animatable(if (dealKey == null) 1f else 0f) }
                 LaunchedEffect(dealKey, card) {
                     if (appear.value < 1f) {
-                        kotlinx.coroutines.delay((if (fastAnimations) 30L else 70L) * i)
-                        appear.animateTo(1f, tween(if (fastAnimations) 120 else 240))
+                        kotlinx.coroutines.delay((70 * dealScale).toLong() * i)
+                        appear.animateTo(1f, tween((240 * dealScale).toInt()))
                     }
                 }
                 val dim = playable != null && card !in playable

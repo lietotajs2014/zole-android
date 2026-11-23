@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
 import lv.zole.core.data.AppSettings
 import lv.zole.core.data.PlayerStats
+import lv.zole.core.ui.Language
 import lv.zole.core.ui.ThemeMode
 import lv.zole.core.ui.ZoleTheme
 import lv.zole.engine.Action
@@ -20,15 +21,18 @@ import lv.zole.engine.MatchState
 import lv.zole.engine.Phase
 import lv.zole.engine.PlayerView
 import lv.zole.engine.Rules
+import lv.zole.engine.ScoringVariant
 import lv.zole.engine.Seat
 import lv.zole.feature.game.GameScreen
 import lv.zole.feature.game.GameUi
+import lv.zole.feature.game.TrickTiming
 import lv.zole.feature.menu.MainScreen
 import lv.zole.feature.menu.NewGameChoice
 import lv.zole.feature.menu.NewGameScreen
 import lv.zole.feature.menu.RulesScreen
 import lv.zole.feature.settings.SettingsScreen
 import lv.zole.feature.stats.ScoreboardScreen
+import lv.zole.feature.stats.StatsScreen
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -43,11 +47,11 @@ import org.robolectric.annotation.GraphicsMode
 class ScreenshotTest {
     @get:Rule val compose = createComposeRule()
 
-    private fun shot(name: String, mode: ThemeMode = ThemeMode.BLACK, content: @Composable () -> Unit) {
+    private fun shot(name: String, mode: ThemeMode = ThemeMode.BLACK, language: Language = Language.LV, advanceMs: Long = 2_000, content: @Composable () -> Unit) {
         // The turn timer animates every frame, so drive the clock by hand.
         compose.mainClock.autoAdvance = false
-        compose.setContent { ZoleTheme(mode) { content() } }
-        compose.mainClock.advanceTimeBy(2_000)
+        compose.setContent { ZoleTheme(mode, language = language) { content() } }
+        compose.mainClock.advanceTimeBy(advanceMs)
         compose.onRoot().captureRoboImage("build/screenshots/$name.png")
     }
 
@@ -79,11 +83,18 @@ class ScreenshotTest {
 
     @Test fun main() = shot("1_main") { MainScreen(7, {}, {}, {}, {}, {}) }
     @Test fun mainLight() = shot("1_main_light", ThemeMode.LIGHT) { MainScreen(7, {}, {}, {}, {}, {}) }
-    @Test fun newGame() = shot("2_new_game") { NewGameScreen(NewGameChoice(Difficulty.MEDIUM, AllPassMode.POOL, 24), {}, {}, {}) }
-    @Test fun settings() = shot("3_settings") { SettingsScreen(AppSettings(), "0.1", {}, {}, {}) }
-    @Test fun scoreboard() = shot("4_scoreboard") { ScoreboardScreen(matchAfterDeals(7), PlayerStats(), {}, {}) }
-    @Test fun stats() = shot("4b_stats") { ScoreboardScreen(matchAfterDeals(7), PlayerStats(deals = 40, asDeclarer = 12, declarerWins = 8), {}, {}, initialTab = 1) }
-    @Test fun rules() = shot("9_rules") { RulesScreen {} }
+    @Test fun newGame() = shot("2_new_game") { NewGameScreen(NewGameChoice(Difficulty.MEDIUM, AllPassMode.POOL, 24, ScoringVariant.CLASSIC), {}, {}) }
+    @Test fun settings() = shot("3_settings") { SettingsScreen(AppSettings(), "0.1", {}, {}) }
+    @Test fun scoreboard() = shot("4_scoreboard") { ScoreboardScreen(matchAfterDeals(7), {}, {}) }
+    @Test fun stats() = shot("4b_stats") { StatsScreen(PlayerStats(deals = 40, asDeclarer = 12, declarerWins = 8), {}) }
+    @Test fun settingsEnglish() = shot("3_settings_en", language = Language.EN) { SettingsScreen(AppSettings(), "0.1", {}, {}) }
+    @Test fun rules() = shot("9_rules") { RulesScreen(ScoringVariant.CLASSIC) {} }
+    @Test fun rulesRondoEnglish() = shot("9_rules_rondo_en", language = Language.EN) { RulesScreen(ScoringVariant.RONDO) {} }
+
+    private val debugSettings = AppSettings(debugMode = true, debugShowBotHands = true, debugTimerSeconds = 0)
+    @Config(qualifiers = "w390dp-h2200dp-xxhdpi")
+    @Test fun settingsDebug() = shot("3_settings_debug") { SettingsScreen(debugSettings, "0.1", {}, {}) }
+    @Test fun biddingDebug() = shot("5_bidding_debug") { GameScreen(ui(MatchEngine.start(config, 7)), debugSettings, {}, {}, {}, {}, {}, {}) }
 
     @Test fun bidding() {
         // Deal 1: dealer is seat 2, so seat 0 bids first.
@@ -97,7 +108,18 @@ class ScreenshotTest {
         shot("6_discard") { Game(m) }
     }
 
-    @Test fun play() {
+    @Test fun play() = shot("7_play") { Game(playState(config)) }
+    @Test fun playHard() = shot("7_play_hard") { Game(playState(config.copy(difficulty = Difficulty.HARD))) }
+
+    /** Halfway through sweeping the first finished trick to its winner. */
+    @Test fun trickCollect() {
+        val m = playState(config)
+        val trick = m.deal.tricks.first().plays
+        val ui = GameUi(match = m, view = PlayerView.of(m.deal, Seat(0)), shownTrick = trick, busy = true)
+        shot("7b_trick_collect", advanceMs = TrickTiming.HOLD_MS + TrickTiming.COLLECT_MS / 2) { GameScreen(ui, AppSettings(), {}, {}, {}, {}, {}, {}) }
+    }
+
+    private fun playState(config: MatchConfig): MatchState {
         var m = MatchEngine.start(config, 7)
         m = MatchEngine.reduce(m, MatchAction.InDeal(Action.Bid(Seat(0), BidChoice.PASS)))
         m = MatchEngine.reduce(m, MatchAction.InDeal(Action.Bid(Seat(1), BidChoice.TAKE)))
@@ -108,8 +130,10 @@ class ScreenshotTest {
             if (p.turn == Seat(0) && it >= 3) return@repeat
             m = MatchEngine.reduce(m, MatchAction.InDeal(Action.PlayCard(p.turn, DealEngine.legalCards(m.deal, p.turn).last())))
         }
-        shot("7_play") { Game(m) }
+        return m
     }
+
+    @Test fun biddingEnglish() = shot("5_bidding_en", language = Language.EN) { Game(MatchEngine.start(config, 7)) }
 
     @Test fun result() {
         var m = MatchEngine.start(config, 7)

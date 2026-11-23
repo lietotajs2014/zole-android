@@ -24,7 +24,7 @@ data class DealResult(
     val tricksBySeat: Map<Seat, Int>,
     val pointsBySeat: Map<Seat, Int>,
     val scores: Map<Seat, Int>,
-    /** Galdiņš only: who lost. */
+    /** Galds only: who lost. */
     val tableLoser: Seat? = null,
 ) {
     companion object {
@@ -41,15 +41,32 @@ data class DealResult(
             val tricksBySeat = Seat.ALL.associateWith { seat -> state.tricksOf(seat).size }
             val pointsBySeat = Seat.ALL.associateWith { seat -> state.tricksOf(seat).sumOf { it.points } }.toMutableMap()
             if (contract == Contract.TABLE) {
-                // Galdiņš: the talon goes to whoever took the first trick.
+                // Galds: the talon goes to whoever took the first trick.
                 state.tricks.firstOrNull()?.let { first ->
                     pointsBySeat[first.winner] = pointsBySeat.getValue(first.winner) + state.talon.sumOf { it.points }
                 }
-                val loser = Seat.ALL.maxWith(
-                    compareBy<Seat>({ tricksBySeat.getValue(it) }, { pointsBySeat.getValue(it) })
-                        .thenByDescending { (it.index - state.firstHand.index + 3) % 3 },
-                )
-                val scores = Seat.ALL.associateWith { if (it == loser) -2 * rules.tableLoserPays else rules.tableLoserPays }
+                val seatOrder = compareByDescending<Seat> { (it.index - state.firstHand.index + 3) % 3 }
+                val scores: Map<Seat, Int>
+                val loser: Seat
+                if (rules.scoring == ScoringVariant.RONDO) {
+                    // Rondo: most eyes loses; each winner takes 3 (no tricks), 2 (up to 30 eyes) or 1.
+                    loser = Seat.ALL.maxWith(
+                        compareBy<Seat>({ pointsBySeat.getValue(it) }, { tricksBySeat.getValue(it) }).then(seatOrder),
+                    )
+                    val won = Seat.ALL.filter { it != loser }.associateWith { seat ->
+                        when {
+                            tricksBySeat.getValue(seat) == 0 -> rules.rondoNoTricks
+                            pointsBySeat.getValue(seat) <= Rules.DECLARER_JANI_LOSE -> rules.rondoJani
+                            else -> rules.rondoWin
+                        }
+                    }
+                    scores = Seat.ALL.associateWith { won[it] ?: -won.values.sum() }
+                } else {
+                    loser = Seat.ALL.maxWith(
+                        compareBy<Seat>({ tricksBySeat.getValue(it) }, { pointsBySeat.getValue(it) }).then(seatOrder),
+                    )
+                    scores = Seat.ALL.associateWith { if (it == loser) -2 * rules.tableLoserPays else rules.tableLoserPays }
+                }
                 return DealResult(
                     contract, null, Outcome.TABLE, 0, 0, tricksBySeat, pointsBySeat, scores, tableLoser = loser,
                 )

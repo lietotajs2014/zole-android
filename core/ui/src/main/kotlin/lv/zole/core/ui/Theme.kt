@@ -129,12 +129,14 @@ val Inter = FontFamily(inter(400), inter(500), inter(600), inter(700))
 
 object Zole {
     val colors: ZoleColors @Composable get() = LocalZoleColors.current
+    val strings: Strings @Composable get() = LocalStrings.current
 }
 
 @Composable
 fun ZoleTheme(
     mode: ThemeMode = ThemeMode.BLACK,
     cardStyle: CardStyle = CardStyle(),
+    language: Language = Language.LV,
     content: @Composable () -> Unit,
 ) {
     val dark = when (mode) {
@@ -161,7 +163,7 @@ fun ZoleTheme(
             titleLarge = t.titleLarge.merge(base), titleMedium = t.titleMedium.merge(base), labelLarge = t.labelLarge.merge(base),
         )
     }
-    CompositionLocalProvider(LocalZoleColors provides colors, LocalCardStyle provides cardStyle) {
+    CompositionLocalProvider(LocalZoleColors provides colors, LocalCardStyle provides cardStyle, LocalStrings provides stringsFor(language)) {
         MaterialTheme(colorScheme = scheme, typography = typography, content = content)
     }
 }

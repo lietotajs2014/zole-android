@@ -142,6 +142,29 @@ class DealFlowTest {
         }
     }
 
+    @Test fun `rondo galds loser has most eyes and pays each winner by result`() {
+        val rnd = Random(7)
+        val rules = Rules(allPassMode = AllPassMode.TABLE, scoring = ScoringVariant.RONDO)
+        var checked = 0
+        repeat(2000) { i ->
+            val result = (randomPlayout(rules, i.toLong(), rnd).phase as Phase.Finished).result
+            if (result.contract != Contract.TABLE) return@repeat
+            checked++
+            val loser = checkNotNull(result.tableLoser)
+            assertEquals(result.pointsBySeat.values.max(), result.pointsBySeat.getValue(loser))
+            assertEquals(0, result.scores.values.sum())
+            Seat.ALL.filter { it != loser }.forEach { seat ->
+                val expected = when {
+                    result.tricksBySeat.getValue(seat) == 0 -> 3
+                    result.pointsBySeat.getValue(seat) <= 30 -> 2
+                    else -> 1
+                }
+                assertEquals(expected, result.scores.getValue(seat))
+            }
+        }
+        assertTrue(checked > 50, "enough galds deals")
+    }
+
     @Test fun `illegal moves are rejected`() {
         val s = DealState.deal(Rules(), Seat(2), 7)
         assertThrows<IllegalActionException> { DealEngine.reduce(s, Action.Bid(Seat(1), BidChoice.PASS)) }

@@ -19,9 +19,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
 import lv.zole.core.data.AppSettings
+import lv.zole.core.data.LanguageSetting
 import lv.zole.core.data.ThemeSetting
 import lv.zole.core.ui.BlackColors
 import lv.zole.core.ui.CardStyle
+import lv.zole.core.ui.Language
 import lv.zole.core.ui.LightColors
 import lv.zole.core.ui.ThemeMode
 import lv.zole.core.ui.ZoleTheme
@@ -36,6 +38,7 @@ import lv.zole.feature.menu.RulesScreen
 import lv.zole.feature.settings.SettingsRoute
 import lv.zole.feature.settings.SettingsViewModel
 import lv.zole.feature.stats.ScoreboardRoute
+import lv.zole.feature.stats.StatsRoute
 import lv.zole.feature.stats.StatsViewModel
 
 class MainActivity : ComponentActivity() {
@@ -49,7 +52,11 @@ class MainActivity : ComponentActivity() {
                 ThemeSetting.BLACK -> ThemeMode.BLACK
                 ThemeSetting.SYSTEM -> ThemeMode.SYSTEM
             }
-            ZoleTheme(mode = mode, cardStyle = CardStyle(markTrumps = settings.markTrumps)) {
+            val language = when (settings.language) {
+                LanguageSetting.LV -> Language.LV
+                LanguageSetting.EN -> Language.EN
+            }
+            ZoleTheme(mode = mode, cardStyle = CardStyle(markTrumps = settings.markTrumps), language = language) {
                 SystemBars(mode)
                 ZoleNavigation(container, settings)
             }
@@ -100,18 +107,17 @@ private fun ZoleNavigation(container: AppContainer, settings: AppSettings) {
         }
         composable(Routes.NEW_GAME) {
             NewGameScreen(
-                initial = NewGameChoice(settings.difficulty, settings.allPassMode, settings.dealLimit),
+                initial = NewGameChoice(settings.difficulty, settings.allPassMode, settings.dealLimit, settings.scoring),
                 onBack = { nav.popBackStack() },
-                onScoringTable = { nav.navigate(Routes.RULES) },
                 onStart = { choice ->
                     scope.launch {
                         container.settings.update {
-                            it.copy(difficulty = choice.difficulty, allPassMode = choice.allPassMode, dealLimit = choice.dealLimit)
+                            it.copy(difficulty = choice.difficulty, allPassMode = choice.allPassMode, dealLimit = choice.dealLimit, scoring = choice.scoring)
                         }
                     }
                     container.matches.start(
                         MatchConfig(
-                            rules = Rules(allPassMode = choice.allPassMode, smallZoleEnabled = settings.smallZole),
+                            rules = Rules(allPassMode = choice.allPassMode, smallZoleEnabled = settings.smallZole, scoring = choice.scoring),
                             difficulty = choice.difficulty,
                             dealLimit = choice.dealLimit.takeIf { it > 0 },
                         ),
@@ -136,16 +142,14 @@ private fun ZoleNavigation(container: AppContainer, settings: AppSettings) {
         }
         composable(Routes.STATS) {
             val vm: StatsViewModel = viewModel(factory = viewModelFactory { initializer { StatsViewModel(container.matches, container.database.history()) } })
-            ScoreboardRoute(vm, onBack = { nav.popBackStack() }, onBackToTable = {
-                nav.navigate(Routes.GAME) { popUpTo(Routes.MAIN) }
-            }, initialTab = 1)
+            StatsRoute(vm, onBack = { nav.popBackStack() })
         }
         composable(Routes.SETTINGS) {
             val vm: SettingsViewModel = viewModel(factory = viewModelFactory { initializer { SettingsViewModel(container.settings) } })
-            SettingsRoute(vm, BuildConfig.VERSION_NAME, onBack = { nav.popBackStack() }, onScoringTable = { nav.navigate(Routes.RULES) })
+            SettingsRoute(vm, BuildConfig.VERSION_NAME, onBack = { nav.popBackStack() })
         }
         composable(Routes.RULES) {
-            RulesScreen(onBack = { nav.popBackStack() })
+            RulesScreen(settings.scoring, onBack = { nav.popBackStack() })
         }
     }
 }

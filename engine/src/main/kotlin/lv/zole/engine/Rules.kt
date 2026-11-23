@@ -6,6 +6,10 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class AllPassMode { TABLE, POOL }
 
+/** Which points table is used. Rondo changes only how galds is scored. */
+@Serializable
+enum class ScoringVariant { CLASSIC, RONDO }
+
 /**
  * House rules. All scoring numbers live here so they can be changed without touching the engine.
  * Values are game points per opponent ("no katra pretinieka"), following the Latvian Wikipedia table.
@@ -18,8 +22,13 @@ data class Rules(
     val zole: ContractScores = ContractScores(win = 5, winJani = 6, winAllTricks = 7, lose = -6, loseJani = -7, loseNoTricks = -8),
     val smallZoleWin: Int = 6,
     val smallZoleLose: Int = -7,
-    /** Galdiņš: the loser pays this many points to each other player. */
+    val scoring: ScoringVariant = ScoringVariant.CLASSIC,
+    /** Galds (classic): the loser pays this many points to each other player. */
     val tableLoserPays: Int = 2,
+    /** Galds (Rondo): what each winner takes from the loser, by the winner's own result. */
+    val rondoNoTricks: Int = 3,
+    val rondoJani: Int = 2,
+    val rondoWin: Int = 1,
     /** Pules: points a winning declarer takes from each player for a common pule. */
     val commonPoolValue: Int = 1,
     /** Pules: points a winning declarer takes from the owner of a personal pule. */

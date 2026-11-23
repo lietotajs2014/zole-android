@@ -46,7 +46,7 @@ open class MediumBot : BotStrategy {
         val trumps = hand.count { it.isTrump }
         val score = handScore(hand)
         val lastAfterPasses = view.bids.size == 2 && view.bids.values.all { it == BidChoice.PASS }
-        // A strong-ish hand is a liability in galdiņš, so the last bidder takes a little more readily.
+        // A strong-ish hand is a liability in galds, so the last bidder takes a little more readily.
         val takeThreshold = if (lastAfterPasses && view.rules.allPassMode == AllPassMode.TABLE) 11.0 else 12.5
         return when {
             trumps >= 6 && score >= 19.0 -> BidChoice.ZOLE
@@ -149,7 +149,7 @@ open class MediumBot : BotStrategy {
         return low(legal)
     }
 
-    /** Galdiņš and the mazā zole declarer: take as few tricks as possible. */
+    /** Galds and the mazā zole declarer: take as few tricks as possible. */
     protected fun avoidTricks(view: PlayerView, legal: List<Card>): Card {
         val trick = view.currentTrick
         if (trick.isEmpty()) return weakest(legal)

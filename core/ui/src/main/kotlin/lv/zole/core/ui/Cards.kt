@@ -23,8 +23,6 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import lv.zole.engine.Card
-import lv.zole.engine.Rank
-import lv.zole.engine.Suit
 
 /** Sizes of the text on a card. The defaults match the 86 x 124 hand card. */
 data class CardText(val rank: TextUnit = 25.sp, val suit: TextUnit = 21.sp, val bigSuit: TextUnit = 38.sp, val padH: Dp = 9.dp, val padV: Dp = 8.dp)
@@ -37,15 +35,6 @@ object CardSizes {
     val TableText = CardText(rank = 24.sp, suit = 20.sp, bigSuit = 34.sp)
     val TalonText = CardText(rank = 27.sp, suit = 22.sp, bigSuit = 42.sp, padH = 10.dp, padV = 9.dp)
     val GridText = CardText(rank = 22.sp, suit = 19.sp, bigSuit = 32.sp)
-}
-
-fun Card.spokenName(): String {
-    val r = when (rank) {
-        Rank.ACE -> "dūzis"; Rank.KING -> "kungs"; Rank.QUEEN -> "dāma"; Rank.JACK -> "kalps"
-        else -> rank.label
-    }
-    val s = when (suit) { Suit.CLUBS -> "kreicis"; Suit.SPADES -> "pīķis"; Suit.HEARTS -> "ercens"; Suit.DIAMONDS -> "kāravs" }
-    return "$s $r"
 }
 
 /** A flat card: rank and suit top-left, big suit bottom-right, optional trump dot. */
@@ -61,6 +50,7 @@ fun PlayingCard(
     val c = Zole.colors
     val ink = if (card.suit.isRed) c.cardRed else c.text
     val shape = RoundedCornerShape(radius)
+    val name = Zole.strings.cardName(card)
     Box(
         modifier
             .clip(shape)
@@ -70,7 +60,7 @@ fun PlayingCard(
                 drawContent()
                 if (dimmed) drawRect(Color.Black.copy(alpha = if (c.isDark) 0.55f else 0.35f))
             }
-            .semantics { contentDescription = card.spokenName() },
+            .semantics { contentDescription = name },
     ) {
         Column(Modifier.fillMaxSize().padding(horizontal = text.padH, vertical = text.padV)) {
             ZText(card.rank.label, size = text.rank, weight = FontWeight.SemiBold, color = ink, lineHeight = text.rank)

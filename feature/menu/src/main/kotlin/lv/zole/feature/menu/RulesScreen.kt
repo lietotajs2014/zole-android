@@ -22,77 +22,56 @@ import lv.zole.core.ui.SectionLabel
 import lv.zole.core.ui.SurfaceCard
 import lv.zole.core.ui.ZText
 import lv.zole.core.ui.Zole
+import lv.zole.core.ui.signedPoints
 import lv.zole.engine.Rules
+import lv.zole.engine.ScoringVariant
 
 @Composable
-fun RulesScreen(onBack: () -> Unit) {
+fun RulesScreen(scoring: ScoringVariant, onBack: () -> Unit) {
     val c = Zole.colors
-    val rules = Rules()
+    val t = Zole.strings
+    val rules = Rules(scoring = scoring)
     Column(Modifier.fillMaxSize().background(c.background).systemBarsPadding().padding(horizontal = 20.dp)) {
-        BackHeader("Noteikumi", onBack)
+        BackHeader(t.rules, onBack)
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 20.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
-            Block("Kārtis", "26 kārtis, kopā 120 acis. Dūzis 11, desmitnieks 10, kungs 4, dāma 3, kalps 2, pārējās 0.")
-            Block(
-                "Trumpji",
-                "14 trumpji no stiprākā: ♣Q ♠Q ♥Q ♦Q, ♣J ♠J ♥J ♦J, ♦A ♦10 ♦K ♦9 ♦8 ♦7. " +
-                    "Pārējos mastos (♣ ♠ ♥) ir A, 10, K, 9.",
-            )
-            Block(
-                "Solīšana",
-                "Katram 8 kārtis, 2 galdā. Sāk pirmā roka. Garām: nodod nākamajam. Ņemu: paņem galda kārtis un noliek 2, " +
-                    "to acis skaitās tev. Zole: spēlē bez galda kārtīm, tās skaitās mazajiem. Mazā zole (ja ieslēgta): " +
-                    "jānepaņem neviens stiķis.",
-            )
-            Block(
-                "Ja visi garām",
-                "Galdiņš: katrs par sevi, zaudē tas, kam visvairāk stiķu (vienādi stiķi: vairāk acu). " +
-                    "Pules: pieraksta kopējo puli, un dala nākamais.",
-            )
-            Block(
-                "Izspēle",
-                "Jāliek tā paša masta kārts (trumpji ir viens masts). Ja tādas nav, drīkst likt jebko. " +
-                    "Lielajam vajag vismaz 61 aci.",
-            )
+            Block(t.cardsTitle, t.cardsBody)
+            Block(t.trumpsTitle, t.trumpsBody)
+            Block(t.biddingTitle, t.biddingBody)
+            Block(t.allPassTitle, t.allPassBody(scoring))
+            Block(t.playTitle, t.playBody)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionLabel("Punktu tabula · no katra pretinieka")
+                SectionLabel(t.scoringTableTitle(scoring))
                 SurfaceCard {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
-                        ZText("Rezultāts", Modifier.weight(1f), size = 12.sp, color = c.textSecondary, weight = FontWeight.SemiBold)
-                        ZText("Ņemu", Modifier.weight(0.4f), size = 12.sp, color = c.textSecondary, weight = FontWeight.SemiBold, align = TextAlign.End)
-                        ZText("Zole", Modifier.weight(0.4f), size = 12.sp, color = c.textSecondary, weight = FontWeight.SemiBold, align = TextAlign.End)
+                        ZText(t.result, Modifier.weight(1f), size = 12.sp, color = c.textSecondary, weight = FontWeight.SemiBold)
+                        ZText(t.take, Modifier.weight(0.4f), size = 12.sp, color = c.textSecondary, weight = FontWeight.SemiBold, align = TextAlign.End)
+                        ZText(t.zole, Modifier.weight(0.4f), size = 12.sp, color = c.textSecondary, weight = FontWeight.SemiBold, align = TextAlign.End)
                     }
-                    val rows = listOf(
-                        Triple("Uzvara, 61–90 acis", rules.normal.win, rules.zole.win),
-                        Triple("Uzvara, mazie jaņos (91+)", rules.normal.winJani, rules.zole.winJani),
-                        Triple("Uzvara, visi stiķi", rules.normal.winAllTricks, rules.zole.winAllTricks),
-                        Triple("Zaudējums, 31–60 acis", rules.normal.lose, rules.zole.lose),
-                        Triple("Zaudējums, jaņos (≤30)", rules.normal.loseJani, rules.zole.loseJani),
-                        Triple("Zaudējums, bez stiķa", rules.normal.loseNoTricks, rules.zole.loseNoTricks),
+                    val values = listOf(
+                        rules.normal.win to rules.zole.win,
+                        rules.normal.winJani to rules.zole.winJani,
+                        rules.normal.winAllTricks to rules.zole.winAllTricks,
+                        rules.normal.lose to rules.zole.lose,
+                        rules.normal.loseJani to rules.zole.loseJani,
+                        rules.normal.loseNoTricks to rules.zole.loseNoTricks,
                     )
-                    rows.forEach { (label, n, z) ->
+                    t.scoringRows.zip(values).forEach { (label, v) ->
                         Divider()
                         Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp)) {
                             ZText(label, Modifier.weight(1f), size = 14.sp)
-                            ZText(fmt(n), Modifier.weight(0.4f), size = 14.sp, align = TextAlign.End)
-                            ZText(fmt(z), Modifier.weight(0.4f), size = 14.sp, align = TextAlign.End)
+                            ZText(signedPoints(v.first), Modifier.weight(0.4f), size = 14.sp, align = TextAlign.End)
+                            ZText(signedPoints(v.second), Modifier.weight(0.4f), size = 14.sp, align = TextAlign.End)
                         }
                     }
                 }
-                ZText(
-                    "Mazā zole: ${fmt(rules.smallZoleWin)} / ${fmt(rules.smallZoleLose)}. Galdiņš: zaudētājs maksā ${rules.tableLoserPays} katram. " +
-                        "Pules: uzvarētājs paņem kopējo puli (+${rules.commonPoolValue} no katra) vai cita personīgo puli (+${rules.personalPoolValue}); " +
-                        "zaudētājs, kamēr ir pules, saņem personīgo puli.",
-                    size = 13.sp, color = c.textSecondary, lineHeight = 19.sp,
-                )
+                ZText(t.scoringNote(rules), size = 13.sp, color = c.textSecondary, lineHeight = 19.sp)
             }
         }
     }
 }
-
-private fun fmt(v: Int) = if (v > 0) "+$v" else v.toString().replace("-", "−")
 
 @Composable
 private fun Block(title: String, body: String) {

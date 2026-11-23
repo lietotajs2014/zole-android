@@ -43,6 +43,7 @@ fun MainScreen(
     onSettings: () -> Unit,
 ) {
     val c = Zole.colors
+    val t = Zole.strings
     Column(
         Modifier
             .fillMaxSize()
@@ -58,22 +59,22 @@ fun MainScreen(
             HeroCards()
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ZText("Zole", size = 56.sp, weight = FontWeight.Bold, letterSpacing = (-1).sp)
-                ZText("bet ✨minimalist✨", size = 15.sp, color = c.textSecondary)
+                ZText(t.tagline, size = 15.sp, color = c.textSecondary)
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            PrimaryButton("Spēlēt", onPlay)
+            PrimaryButton(t.play, onPlay)
             if (continueDeal != null) {
                 OutlineButton(onContinue) {
-                    ZText("Turpināt partiju", size = 16.sp, weight = FontWeight.Medium)
-                    ZText("· $continueDeal. dale", size = 16.sp, weight = FontWeight.Medium, color = c.textSecondary)
+                    ZText(t.continueMatch, size = 16.sp, weight = FontWeight.Medium)
+                    ZText(t.continueDeal(continueDeal), size = 16.sp, weight = FontWeight.Medium, color = c.textSecondary)
                 }
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 32.dp)) {
-            NavItem(ZoleIcons.Stats, "Statistika", onStats)
-            NavItem(ZoleIcons.Rules, "Noteikumi", onRules)
-            NavItem(ZoleIcons.Gear, "Iestatījumi", onSettings)
+            NavItem(ZoleIcons.Stats, t.stats, onStats)
+            NavItem(ZoleIcons.Rules, t.rules, onRules)
+            NavItem(ZoleIcons.Gear, t.settings, onSettings)
         }
     }
 }

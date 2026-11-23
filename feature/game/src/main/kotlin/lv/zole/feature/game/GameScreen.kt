@@ -6,6 +6,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -45,7 +46,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
@@ -56,9 +56,12 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
+import lv.zole.core.data.AnimKind
 import lv.zole.core.data.AppSettings
 import lv.zole.core.ui.Avatar
 import lv.zole.core.ui.CardBack
@@ -70,9 +73,11 @@ import lv.zole.core.ui.IconTap
 import lv.zole.core.ui.LinkButton
 import lv.zole.core.ui.PlayingCard
 import lv.zole.core.ui.PrimaryButton
+import lv.zole.core.ui.ProvideMatchStrings
 import lv.zole.core.ui.StatusChip
 import lv.zole.core.ui.TurnTimerCircle
 import lv.zole.core.ui.ZText
+import lv.zole.core.ui.Strings
 import lv.zole.core.ui.Zole
 import lv.zole.core.ui.ZoleIcons
 import lv.zole.engine.AllPassMode
@@ -84,6 +89,7 @@ import lv.zole.engine.MatchState
 import lv.zole.engine.Phase
 import lv.zole.engine.Play
 import lv.zole.engine.PlayerView
+import lv.zole.engine.ScoringVariant
 import lv.zole.engine.Seat
 import lv.zole.engine.TrickRules
 import lv.zole.engine.sortedForHand
@@ -137,17 +143,33 @@ fun GameScreen(
     onPlay: (Card) -> Unit,
     onNextDeal: () -> Unit,
 ) {
+    ProvideMatchStrings(ui.match?.config?.difficulty) {
+        GameContent(ui, settings, onMenu, onScoreboard, onBid, onDiscard, onPlay, onNextDeal)
+    }
+}
+
+@Composable
+private fun GameContent(
+    ui: GameUi,
+    settings: AppSettings,
+    onMenu: () -> Unit,
+    onScoreboard: () -> Unit,
+    onBid: (BidChoice) -> Unit,
+    onDiscard: (List<Card>) -> Unit,
+    onPlay: (Card) -> Unit,
+    onNextDeal: () -> Unit,
+) {
     val c = Zole.colors
     val match = ui.match
     val view = ui.view
     Box(Modifier.fillMaxSize().background(c.background)) {
         if (match == null || view == null) return@Box
         Column(Modifier.fillMaxSize().systemBarsPadding().padding(bottom = 22.dp)) {
-            TableHeader(headerText(match, view), match.totals.getValue(HUMAN), onMenu, onScoreboard)
+            TableHeader(headerText(Zole.strings, match, view), match.totals.getValue(HUMAN), onMenu, onScoreboard)
             when (val phase = view.phase) {
                 is Phase.Bidding -> BiddingTable(ui, view, settings, onBid)
                 is Phase.Discarding ->
-                    if (phase.declarer == HUMAN) DiscardTable(ui, view, match.dealNumber, onDiscard)
+                    if (phase.declarer == HUMAN) DiscardTable(ui, view, settings, match.dealNumber, onDiscard)
                     else BiddingTable(ui, view, settings, onBid)
                 is Phase.Playing -> PlayTable(ui, view, settings, onPlay)
                 is Phase.Finished -> FinishedTable(view)
@@ -161,16 +183,13 @@ fun GameScreen(
     }
 }
 
-private fun headerText(match: MatchState, view: PlayerView): String {
+private fun headerText(t: Strings, match: MatchState, view: PlayerView): String {
     val n = match.dealNumber
     return when (view.phase) {
-        is Phase.Bidding -> if (match.config.rules.allPassMode == AllPassMode.POOL) {
-            val pools = match.pools.total
-            "Dale $n · " + if (pools == 0) "Pules nav" else "Pules: $pools"
-        } else "Dale $n · Solīšana"
-        is Phase.Discarding -> "Dale $n · ${view.declarer?.displayName()} ņem"
-        is Phase.Playing -> "Dale $n · ${minOf(view.tricks.size + 1, 8)}. stiķis no 8"
-        is Phase.Finished -> "Dale $n · beigusies"
+        is Phase.Bidding -> if (match.config.rules.allPassMode == AllPassMode.POOL) t.dealPools(n, match.pools.total) else t.dealBidding(n)
+        is Phase.Discarding -> t.dealTaking(n, view.declarer?.displayName(t).orEmpty())
+        is Phase.Playing -> t.dealTrick(n, minOf(view.tricks.size + 1, 8))
+        is Phase.Finished -> t.dealOver(n)
     }
 }
 
@@ -181,7 +200,7 @@ private fun TableHeader(center: String, total: Int, onMenu: () -> Unit, onScoreb
         Modifier.fillMaxWidth().padding(top = 12.dp, start = 17.dp, end = 17.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(56.dp)) { IconTap(ZoleIcons.Menu, "Izvēlne", onMenu) }
+        Box(Modifier.width(56.dp)) { IconTap(ZoleIcons.Menu, Zole.strings.menu, onMenu) }
         ZText(center, Modifier.weight(1f), size = 14.sp, color = c.textSecondary, align = TextAlign.Center, maxLines = 1)
         Box(
             Modifier
@@ -197,25 +216,54 @@ private fun TableHeader(center: String, total: Int, onMenu: () -> Unit, onScoreb
 // ---------- Opponents ----------
 
 @Composable
-private fun Opponents(modifier: Modifier = Modifier, status: @Composable (Seat) -> Unit) {
-    Row(modifier.fillMaxWidth().padding(start = 33.dp, end = 33.dp, top = 28.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+private fun Opponents(modifier: Modifier = Modifier, hands: Map<Seat, List<Card>>? = null, status: @Composable (Seat) -> Unit) {
+    val t = Zole.strings
+    val padding = if (hands != null) 16.dp else 33.dp
+    Row(modifier.fillMaxWidth().padding(start = padding, end = padding, top = 28.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         for (seat in listOf(Seat(1), Seat(2))) {
-            Column(Modifier.width(96.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Avatar(seat.initial())
-                ZText(seat.displayName(), size = 15.sp, weight = FontWeight.Medium)
+            Column(Modifier.width(if (hands != null) 128.dp else 96.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Avatar(seat.initial(t))
+                ZText(seat.displayName(t), size = 15.sp, weight = FontWeight.Medium)
                 status(seat)
+                hands?.get(seat)?.let { RevealedHand(it) }
             }
         }
     }
 }
 
+/** Debug: a bot's cards as compact labels, four per row (trumps in bold). */
+@Composable
+private fun RevealedHand(cards: List<Card>) {
+    val c = Zole.colors
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        cards.sortedForHand().chunked(4).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { card ->
+                    ZText(
+                        card.rank.label + card.suit.symbol,
+                        size = 13.sp,
+                        weight = if (card.isTrump) FontWeight.Bold else FontWeight.Normal,
+                        color = if (card.suit.isRed) c.cardRed else c.text,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Debug: the bots' hands when "show bot cards" is on, otherwise null. */
+private fun botHands(ui: GameUi, settings: AppSettings): Map<Seat, List<Card>>? =
+    if (settings.showBotHands) ui.match?.deal?.hands?.filterKeys { it != HUMAN } else null
+
 @Composable
 private fun BidStatus(seat: Seat, view: PlayerView, thinking: Seat?) {
+    val t = Zole.strings
     Box(Modifier.heightIn(min = 24.dp), contentAlignment = Alignment.Center) {
         val bid = view.bids[seat]
         when {
-            bid != null -> StatusChip(bid.label())
-            thinking == seat -> StatusChip("Domā…")
+            bid != null -> StatusChip(t.bid(bid))
+            thinking == seat -> StatusChip(t.thinkingChip)
         }
     }
 }
@@ -225,25 +273,28 @@ private fun BidStatus(seat: Seat, view: PlayerView, thinking: Seat?) {
 @Composable
 private fun ColumnScope.BiddingTable(ui: GameUi, view: PlayerView, settings: AppSettings, onBid: (BidChoice) -> Unit) {
     val c = Zole.colors
+    val t = Zole.strings
     val myTurn = view.phase is Phase.Bidding && view.isMyTurn && !ui.busy
-    Opponents { BidStatus(it, view, ui.thinking) }
+    Opponents(hands = botHands(ui, settings)) { BidStatus(it, view, ui.thinking) }
     Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             if (view.phase is Phase.Bidding) {
-                repeat(2) { CardBack(Modifier.size(CardSizes.TableWidth, CardSizes.TableHeight)) }
+                val talon = if (settings.showBotHands) ui.match?.deal?.talon else null
+                if (talon != null) talon.forEach { PlayingCard(it, Modifier.size(CardSizes.TableWidth, CardSizes.TableHeight), text = CardSizes.TableText) }
+                else repeat(2) { CardBack(Modifier.size(CardSizes.TableWidth, CardSizes.TableHeight)) }
             }
         }
     }
     Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
             if (myTurn) {
-                ZText("Tavs lēmums", size = 22.sp, weight = FontWeight.Bold)
-                Timer(ui.turnStartedAt, 30.dp)
+                ZText(t.yourDecision, size = 22.sp, weight = FontWeight.Bold)
+                if (settings.turnTimerMs > 0) Timer(ui.turnStartedAt, settings.turnTimerMs, 30.dp)
             } else {
                 val who = view.turn
                 val text = when {
-                    view.phase is Phase.Discarding -> "${view.declarer?.displayName()} maina kārtis…"
-                    who != null && who != HUMAN -> "${who.displayName()} domā…"
+                    view.phase is Phase.Discarding -> t.discarding(view.declarer?.displayName(t).orEmpty())
+                    who != null && who != HUMAN -> t.thinking(who.displayName(t))
                     else -> ""
                 }
                 ZText(text, size = 17.sp, weight = FontWeight.Medium, color = c.textSecondary)
@@ -263,7 +314,8 @@ private fun ColumnScope.BiddingTable(ui: GameUi, view: PlayerView, settings: App
         cards = view.hand,
         modifier = Modifier.offset(y = 6.dp),
         dealKey = ui.match?.dealNumber,
-        fastAnimations = settings.fastAnimations,
+        dealScale = settings.animScale(AnimKind.DEAL),
+        liftScale = settings.animScale(AnimKind.LIFT),
     )
 }
 
@@ -285,19 +337,18 @@ private fun BidButton(choice: BidChoice, enabled: Boolean, compact: Boolean, mod
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        ZText(choice.label(), size = if (compact) 15.sp else 18.sp, weight = FontWeight.SemiBold, color = fg, align = TextAlign.Center)
+        ZText(Zole.strings.bid(choice), size = if (compact) 15.sp else 18.sp, weight = FontWeight.SemiBold, color = fg, align = TextAlign.Center)
     }
 }
 
 @Composable
-private fun Timer(startedAt: Long?, size: Dp) {
+private fun Timer(startedAt: Long?, total: Long, size: Dp) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(startedAt) {
         while (startedAt != null) {
             withFrameMillis { now = System.currentTimeMillis() }
         }
     }
-    val total = TurnTimer.durationMs
     val elapsed = if (startedAt == null) 0 else (now - startedAt).coerceIn(0, total)
     val remaining = 1f - elapsed.toFloat() / total
     val secondsLeft = ((total - elapsed + 999) / 1000).toInt()
@@ -307,7 +358,7 @@ private fun Timer(startedAt: Long?, size: Dp) {
 // ---------- Discard ----------
 
 @Composable
-private fun ColumnScope.DiscardTable(ui: GameUi, view: PlayerView, dealNumber: Int, onDiscard: (List<Card>) -> Unit) {
+private fun ColumnScope.DiscardTable(ui: GameUi, view: PlayerView, settings: AppSettings, dealNumber: Int, onDiscard: (List<Card>) -> Unit) {
     val c = Zole.colors
     val selected = remember(dealNumber) { mutableStateListOf<Card>() }
     val talon = view.talonInHand
@@ -322,13 +373,13 @@ private fun ColumnScope.DiscardTable(ui: GameUi, view: PlayerView, dealNumber: I
             Spacer(Modifier.weight(1f))
             Row(Modifier.fillMaxWidth().padding(bottom = 36.dp), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
                 talon.forEach { card ->
-                    SelectableCard(card, card in selected, CardSizes.TalonText, Modifier.size(98.dp, 140.dp)) { toggle(card) }
+                    SelectableCard(card, card in selected, CardSizes.TalonText, Modifier.size(98.dp, 140.dp), settings.animScale(AnimKind.LIFT)) { toggle(card) }
                 }
             }
             rest.chunked(4).forEachIndexed { rowIndex, row ->
                 Row(Modifier.fillMaxWidth().padding(top = if (rowIndex > 0) 10.dp else 0.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     row.forEach { card ->
-                        SelectableCard(card, card in selected, CardSizes.GridText, Modifier.weight(1f).height(112.dp)) { toggle(card) }
+                        SelectableCard(card, card in selected, CardSizes.GridText, Modifier.weight(1f).height(112.dp), settings.animScale(AnimKind.LIFT)) { toggle(card) }
                     }
                     repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
@@ -336,20 +387,20 @@ private fun ColumnScope.DiscardTable(ui: GameUi, view: PlayerView, dealNumber: I
             Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(44.dp, Alignment.CenterHorizontally)) {
                 ZText("${selected.size}/2", size = 20.sp, weight = FontWeight.Bold, color = if (selected.size == 2) c.accent else c.text)
                 Row {
-                    ZText("Punkti - ", size = 20.sp, color = c.textTertiary)
+                    ZText(Zole.strings.discardPoints, size = 20.sp, color = c.textTertiary)
                     ZText(selected.sumOf { it.points }.toString(), size = 20.sp, weight = FontWeight.Bold)
                 }
             }
             Spacer(Modifier.weight(0.4f))
-            PrimaryButton("Nolikt un sākt", { onDiscard(selected.toList()) }, enabled = selected.size == 2 && !ui.busy)
+            PrimaryButton(Zole.strings.discardAndStart, { onDiscard(selected.toList()) }, enabled = selected.size == 2 && !ui.busy)
         }
-        Opponents(Modifier.align(Alignment.TopCenter)) { BidStatus(it, view, null) }
+        Opponents(Modifier.align(Alignment.TopCenter), hands = botHands(ui, settings)) { BidStatus(it, view, null) }
     }
 }
 
 @Composable
-private fun SelectableCard(card: Card, selected: Boolean, text: CardText, modifier: Modifier, onClick: () -> Unit) {
-    val lift by animateFloatAsState(if (selected) -4f else 0f, tween(120), label = "lift")
+private fun SelectableCard(card: Card, selected: Boolean, text: CardText, modifier: Modifier, animScale: Float, onClick: () -> Unit) {
+    val lift by animateFloatAsState(if (selected) -4f else 0f, tween((120 * animScale).toInt()), label = "lift")
     Box(
         modifier
             .graphicsLayer { translationY = lift * density }
@@ -365,17 +416,18 @@ private fun SelectableCard(card: Card, selected: Boolean, text: CardText, modifi
 @Composable
 private fun ColumnScope.PlayTable(ui: GameUi, view: PlayerView, settings: AppSettings, onPlay: (Card) -> Unit) {
     val c = Zole.colors
+    val t = Zole.strings
     val myTurn = view.isMyTurn && !ui.busy
     val legal = if (myTurn) view.legalCards() else emptyList()
-    Opponents { seat ->
-        val role = roleOf(seat, view.declarer, view.contract)
+    Opponents(hands = botHands(ui, settings)) { seat ->
+        val role = roleOf(t, seat, view.declarer, view.contract)
         ZText(
-            listOf(role, cardsWord(view.cardsLeft.getValue(seat))).filter { it.isNotEmpty() }.joinToString("\n"),
+            listOf(role, t.cards(view.cardsLeft.getValue(seat))).filter { it.isNotEmpty() }.joinToString("\n"),
             size = 13.sp, color = c.textSecondary, align = TextAlign.Center, lineHeight = 17.sp,
         )
     }
     Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-        TrickArea(ui.shownTrick, showSlot = !ui.busy && ui.shownTrick.none { it.seat == HUMAN }, revealing = ui.busy)
+        TrickArea(ui.shownTrick, showSlot = !ui.busy && ui.shownTrick.none { it.seat == HUMAN }, revealing = ui.busy, settings = settings)
     }
     Row(
         Modifier.fillMaxWidth().height(32.dp).padding(bottom = 0.dp),
@@ -383,11 +435,11 @@ private fun ColumnScope.PlayTable(ui: GameUi, view: PlayerView, settings: AppSet
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (myTurn) {
-            ZText("Tavs gājiens", size = 22.sp, weight = FontWeight.Bold)
-            Timer(ui.turnStartedAt, 30.dp)
+            ZText(t.yourTurn, size = 22.sp, weight = FontWeight.Bold)
+            if (settings.turnTimerMs > 0) Timer(ui.turnStartedAt, settings.turnTimerMs, 30.dp)
         } else if (!ui.busy) {
             val who = view.turn
-            if (who != null && who != HUMAN) ZText("${who.displayName()} domā…", size = 17.sp, weight = FontWeight.Medium, color = c.textSecondary)
+            if (who != null && who != HUMAN) ZText(t.thinking(who.displayName(t)), size = 17.sp, weight = FontWeight.Medium, color = c.textSecondary)
         }
     }
     Spacer(Modifier.height(20.dp))
@@ -397,7 +449,8 @@ private fun ColumnScope.PlayTable(ui: GameUi, view: PlayerView, settings: AppSet
         playable = if (myTurn) legal.toSet() else null,
         highlight = if (myTurn) legal.singleOrNull() else null,
         onPlay = if (myTurn) onPlay else null,
-        fastAnimations = settings.fastAnimations,
+        dealScale = settings.animScale(AnimKind.DEAL),
+        liftScale = settings.animScale(AnimKind.LIFT),
     )
 }
 
@@ -409,10 +462,26 @@ private fun slotOf(seat: Seat) = when (seat.index) {
     else -> SlotPos(88.dp, 120.dp, 0f, 0f, 260f)
 }
 
+/** Where a finished trick is swept to (top-left of the pile, in TrickArea coordinates): towards the winner's seat. */
+private fun collectTarget(winner: Seat): DpOffset = when (winner.index) {
+    1 -> DpOffset((-110).dp, (-250).dp)
+    2 -> DpOffset(286.dp, (-250).dp)
+    else -> DpOffset(88.dp, 360.dp)
+}
+
 @Composable
-private fun TrickArea(trick: List<Play>, showSlot: Boolean, revealing: Boolean) {
+private fun TrickArea(trick: List<Play>, showSlot: Boolean, revealing: Boolean, settings: AppSettings) {
     val c = Zole.colors
     val winner = if (revealing && trick.size == 3) trick[TrickRules.winnerIndex(trick.map { it.card })].seat else null
+    // After the full trick has been shown, sweep all three cards over to the winner.
+    val collect = remember(trick) { Animatable(0f) }
+    LaunchedEffect(trick, winner) {
+        if (winner != null) {
+            delay(TrickTiming.holdMs(settings))
+            collect.animateTo(1f, tween(TrickTiming.collectMs(settings).toInt(), easing = FastOutLinearInEasing))
+        }
+    }
+    val target = winner?.let { collectTarget(it) }
     Box(Modifier.size(260.dp, 250.dp)) {
         if (showSlot) {
             val pos = slotOf(HUMAN)
@@ -433,16 +502,22 @@ private fun TrickArea(trick: List<Play>, showSlot: Boolean, revealing: Boolean) 
             key(play) {
                 val pos = slotOf(play.seat)
                 val anim = remember { Animatable(0f) }
-                LaunchedEffect(Unit) { anim.animateTo(1f, tween(230)) }
+                LaunchedEffect(Unit) { anim.animateTo(1f, tween((230 * settings.animScale(AnimKind.PLAY)).toInt())) }
                 Box(
                     Modifier
                         .offset(pos.x, pos.y)
                         .graphicsLayer {
-                            translationX = (1f - anim.value) * pos.fromX * density
-                            translationY = (1f - anim.value) * pos.fromY * density
-                            alpha = 0.3f + 0.7f * anim.value
-                        }
-                        .rotate(pos.angle),
+                            val p = collect.value
+                            val tx = if (target != null) (target.x - pos.x).value * p else 0f
+                            val ty = if (target != null) (target.y - pos.y).value * p else 0f
+                            translationX = ((1f - anim.value) * pos.fromX + tx) * density
+                            translationY = ((1f - anim.value) * pos.fromY + ty) * density
+                            rotationZ = pos.angle * (1f - p)
+                            val s = 1f - 0.45f * p
+                            scaleX = s
+                            scaleY = s
+                            alpha = (0.3f + 0.7f * anim.value) * (1f - p * p)
+                        },
                 ) {
                     PlayingCard(
                         play.card,
@@ -467,6 +542,7 @@ private fun ColumnScope.FinishedTable(view: PlayerView) {
 @Composable
 private fun BoxScope.ResultSheet(match: MatchState, record: DealRecord, onNext: () -> Unit, onScoreboard: () -> Unit) {
     val c = Zole.colors
+    val t = Zole.strings
     val r = record.result
     Box(
         Modifier
@@ -487,28 +563,34 @@ private fun BoxScope.ResultSheet(match: MatchState, record: DealRecord, onNext: 
         Box(Modifier.align(Alignment.CenterHorizontally).size(40.dp, 5.dp).clip(RoundedCornerShape(3.dp)).background(c.divider))
         val declarer = r.declarer
         val title = when {
-            r.contract == null -> "Visi garām"
-            r.contract == Contract.TABLE -> if (r.tableLoser == HUMAN) "Tu zaudēji" else "${r.tableLoser?.displayName()} zaudēja"
-            declarer == HUMAN -> if (r.outcome.declarerWon) "Tu uzvarēji!" else "Tu zaudēji"
-            r.outcome.declarerWon -> "${declarer?.displayName()} uzvarēja"
-            else -> "Jūs uzvarējāt!"
+            r.contract == null -> t.allPassed
+            r.contract == Contract.TABLE -> if (r.tableLoser == HUMAN) t.youLost else t.lost(r.tableLoser?.displayName(t).orEmpty())
+            declarer == HUMAN -> if (r.outcome.declarerWon) t.youWon else t.youLost
+            r.outcome.declarerWon -> t.won(declarer?.displayName(t).orEmpty())
+            else -> t.defendersWon
         }
         val label = when (r.contract) {
-            null -> "Pule"
-            Contract.TABLE -> "Galdiņš"
-            else -> "${contractWord(r.contract)} · ${outcomeWord(r.outcome)}"
+            null -> t.pool
+            Contract.TABLE -> t.table
+            else -> "${t.contract(r.contract)} · ${t.outcome(r.outcome)}"
         }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             ZText(label.uppercase(), size = 13.sp, weight = FontWeight.SemiBold, color = c.accent, letterSpacing = 0.8.sp)
             ZText(title, size = 32.sp, weight = FontWeight.Bold, letterSpacing = (-0.6).sp)
             when (r.contract) {
-                null -> ZText("Pieraksta kopējo puli. Pules: ${record.poolsAfter.total}", size = 15.sp, color = c.textSecondary)
-                Contract.TABLE -> ZText(
-                    "Stiķi: " + Seat.ALL.joinToString(" · ") { "${it.displayName()} ${r.tricksBySeat.getValue(it)}" },
-                    size = 15.sp, color = c.textSecondary,
-                )
+                null -> ZText(t.poolAdded(record.poolsAfter.total), size = 15.sp, color = c.textSecondary)
+                Contract.TABLE -> {
+                    // Rondo decides galds by eyes, classic by tricks.
+                    val byEyes = match.config.rules.scoring == ScoringVariant.RONDO
+                    val counts = if (byEyes) r.pointsBySeat else r.tricksBySeat
+                    ZText(
+                        (if (byEyes) t.eyesLabel else t.tricksLabel) +
+                            Seat.ALL.joinToString(" · ") { "${it.displayName(t)} ${counts.getValue(it)}" },
+                        size = 15.sp, color = c.textSecondary,
+                    )
+                }
                 Contract.SMALL_ZOLE -> ZText(
-                    "${declarer?.displayName()}: ${r.tricksBySeat.getValue(declarer ?: HUMAN)} stiķi",
+                    t.tricksOf(declarer?.displayName(t).orEmpty(), r.tricksBySeat.getValue(declarer ?: HUMAN)),
                     size = 15.sp, color = c.textSecondary,
                 )
                 else -> {}
@@ -527,7 +609,7 @@ private fun BoxScope.ResultSheet(match: MatchState, record: DealRecord, onNext: 
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     ZText(
-                        seat.displayName(), Modifier.widthIn(min = 64.dp), size = 16.sp,
+                        seat.displayName(t), Modifier.widthIn(min = 64.dp), size = 16.sp,
                         weight = if (seat == HUMAN) FontWeight.SemiBold else FontWeight.Normal, align = TextAlign.End,
                     )
                     ZText(
@@ -540,8 +622,8 @@ private fun BoxScope.ResultSheet(match: MatchState, record: DealRecord, onNext: 
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            PrimaryButton(if (match.isOver) "Partija beigusies" else "Nākamā dale", onNext)
-            LinkButton("Punktu tabula", onScoreboard)
+            PrimaryButton(if (match.isOver) t.matchOver else t.nextDeal, onNext)
+            LinkButton(t.scoreboard, onScoreboard)
         }
     }
 }
@@ -549,6 +631,7 @@ private fun BoxScope.ResultSheet(match: MatchState, record: DealRecord, onNext: 
 @Composable
 private fun PointsBar(declarer: Seat, declarerPoints: Int, defenderPoints: Int) {
     val c = Zole.colors
+    val t = Zole.strings
     val fraction = (declarerPoints / 120f).coerceIn(0.02f, 0.98f)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(Modifier.fillMaxWidth().height(12.dp)) {
@@ -566,12 +649,12 @@ private fun PointsBar(declarer: Seat, declarerPoints: Int, defenderPoints: Int) 
         }
         Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.Bottom) {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.Bottom) {
-                ZText("${declarer.displayName()} ", size = 13.sp, color = c.textSecondary)
+                ZText("${declarer.displayName(t)} ", size = 13.sp, color = c.textSecondary)
                 ZText(declarerPoints.toString(), size = 18.sp, weight = FontWeight.Bold, color = c.accent)
             }
             ZText("61", size = 12.sp, color = c.textSecondary)
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
-                ZText("Mazie ", size = 13.sp, color = c.textSecondary)
+                ZText(t.defenders, size = 13.sp, color = c.textSecondary)
                 ZText(defenderPoints.toString(), size = 18.sp, weight = FontWeight.Bold)
             }
         }

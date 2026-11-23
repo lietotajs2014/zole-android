@@ -18,6 +18,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import lv.zole.ai.BotPlayer
 import lv.zole.ai.Bots
+import lv.zole.core.data.AnimKind
 import lv.zole.core.data.AppSettings
 import lv.zole.core.data.MatchRepository
 import lv.zole.core.data.SettingsRepository
@@ -34,12 +35,19 @@ import lv.zole.engine.Seat
 import kotlin.random.Random
 
 /**
- * Turn timer for the human player. The length is a plain variable so it is easy to tune while testing;
+ * Turn timer for the human player. The length comes from [AppSettings.turnTimerMs] (tunable in debug mode);
  * the vibration points (half time, 5 s left) are derived from it.
  */
 object TurnTimer {
-    var durationMs: Long = 15_000
     const val WARNING_MS: Long = 5_000
+}
+
+/** A finished trick stays on the table for [HOLD_MS], then sweeps to the winner over [COLLECT_MS] (before speed scaling). */
+object TrickTiming {
+    const val HOLD_MS = 650L
+    const val COLLECT_MS = 380L
+    fun holdMs(s: AppSettings) = (HOLD_MS * s.animScale(AnimKind.TRICK_HOLD)).toLong()
+    fun collectMs(s: AppSettings) = (COLLECT_MS * s.animScale(AnimKind.TRICK_COLLECT)).toLong()
 }
 
 enum class Vibe { TURN_START, HALF_TIME, FIVE_LEFT, TRICK_WON }
@@ -80,7 +88,6 @@ class GameViewModel(
     /** Bumped on every state publish so the bot loop can wait for "something changed". */
     private val tick = MutableStateFlow(0L)
 
-    private val fast: Boolean get() = settings.value.fastAnimations
 
     init {
         viewModelScope.launch {
@@ -156,7 +163,7 @@ class GameViewModel(
                 revealing = trick.plays
                 publish()
                 if (trick.winner == HUMAN) _events.tryEmit(Vibe.TRICK_WON)
-                delay(if (fast) 450 else 950)
+                delay(TrickTiming.holdMs(settings.value) + TrickTiming.collectMs(settings.value) + 40)
                 revealing = null
             }
             publish()
@@ -193,12 +200,19 @@ class GameViewModel(
         val key = "${match.dealNumber}/${deal.bids.size}/${deal.tricks.size}/${(phase as? Phase.Playing)?.trick?.size}"
         if (key == timedTurnKey) return
         timedTurnKey = key
+        val total = settings.value.turnTimerMs
+        timerJob?.cancel()
+        if (total <= 0) {
+            // No time limit (debug): just signal the turn.
+            timerJob = null
+            turnStartedAt = null
+            _events.tryEmit(Vibe.TURN_START)
+            return
+        }
         val start = System.currentTimeMillis()
         turnStartedAt = start
         _ui.value = _ui.value.copy(turnStartedAt = start)
-        timerJob?.cancel()
         timerJob = viewModelScope.launch {
-            val total = TurnTimer.durationMs
             _events.tryEmit(Vibe.TURN_START)
             val half = total / 2
             val warn = (total - TurnTimer.WARNING_MS).coerceAtLeast(0)
@@ -235,5 +249,5 @@ class GameViewModel(
         }
     }
 
-    private fun Long.scaled(): Long = if (fast) this / 2 else this
+    private fun Long.scaled(): Long = (this * settings.value.animScale(AnimKind.BOT_THINK)).toLong()
 }
